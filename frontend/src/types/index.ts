@@ -1,210 +1,234 @@
-export type UserRole = 'admin' | 'analyst' | 'auditor' | 'viewer';
+export type UserRole = 'ADMIN' | 'GRC_OFFICER';
 
 export interface UserProfile {
   id: string;
   email: string;
   full_name: string;
   role: UserRole;
-  department: string | null;
-  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
 
+export type AssetType = 'Application' | 'Database' | 'Server' | 'Network' | 'Endpoint' | 'Cloud Service' | 'Other';
+export type CriticalityLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type AssetStatus = 'ACTIVE' | 'INACTIVE' | 'RETIRED';
+
 export interface Asset {
   id: string;
+  asset_code: string;
   name: string;
-  type: 'server' | 'application' | 'database' | 'network_device' | 'endpoint' | 'cloud_service' | 'other';
+  type: AssetType;
   description: string | null;
   owner: string | null;
   department: string | null;
-  location: string | null;
-  status: 'active' | 'inactive' | 'decommissioned' | 'under_review';
-  criticality: 'critical' | 'high' | 'medium' | 'low';
-  classification: 'public' | 'internal' | 'confidential' | 'restricted';
-  created_by: string;
+  criticality: CriticalityLevel;
+  status: AssetStatus;
   created_at: string;
   updated_at: string;
 }
+
+export type RiskCategory =
+  | 'Access Control'
+  | 'Data Security'
+  | 'Availability'
+  | 'Infrastructure'
+  | 'Application Security'
+  | 'Compliance'
+  | 'Operational'
+  | 'Third Party'
+  | 'Other';
+
+export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type RiskStatus = 'OPEN' | 'MITIGATED' | 'ACCEPTED' | 'CLOSED';
 
 export interface Risk {
   id: string;
   risk_code: string;
   title: string;
+  asset_id: string;
+  category: RiskCategory | string;
   description: string | null;
-  category: 'operational' | 'security' | 'compliance' | 'strategic' | 'financial' | 'reputational';
-  source: string | null;
-  asset_id: string | null;
-  status: 'identified' | 'assessed' | 'mitigated' | 'accepted' | 'closed';
   likelihood: number; // 1-5
   impact: number; // 1-5
-  risk_score: number; // likelihood * impact
-  risk_level: 'critical' | 'high' | 'medium' | 'low';
-  risk_owner: string | null;
-  treatment: 'mitigate' | 'accept' | 'transfer' | 'avoid' | null;
-  residual_likelihood: number | null;
-  residual_impact: number | null;
-  residual_score: number | null;
-  residual_level: string | null;
-  created_by: string;
+  risk_score: number; // likelihood * impact (1-25)
+  risk_level: RiskLevel;
+  existing_mitigation: string | null;
+  recommendation: string | null;
+  status: RiskStatus;
+  owner: string | null;
   created_at: string;
   updated_at: string;
+  asset?: Asset | null;
 }
+
+export type ControlFrequency =
+  | 'Continuous'
+  | 'Daily'
+  | 'Weekly'
+  | 'Monthly'
+  | 'Quarterly'
+  | 'Semi-Annual'
+  | 'Annual'
+  | 'Ad Hoc';
+
+export type ImplementationStatus =
+  | 'IMPLEMENTED'
+  | 'PARTIALLY_IMPLEMENTED'
+  | 'NOT_IMPLEMENTED'
+  | 'NOT_APPLICABLE';
+
+export type ControlEffectiveness =
+  | 'EFFECTIVE'
+  | 'PARTIALLY_EFFECTIVE'
+  | 'INEFFECTIVE'
+  | 'NOT_ASSESSED';
 
 export interface Control {
   id: string;
   control_code: string;
-  title: string;
+  name: string;
   description: string | null;
-  type: 'preventive' | 'detective' | 'corrective' | 'compensating';
-  category: 'technical' | 'administrative' | 'physical';
-  frequency: 'continuous' | 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually' | 'ad_hoc';
-  status: 'active' | 'inactive' | 'planned' | 'under_review';
+  risk_id: string;
   owner: string | null;
-  effectiveness: 'effective' | 'partially_effective' | 'ineffective' | 'not_assessed' | null;
-  framework_ref: string | null;
-  created_by: string;
+  frequency: ControlFrequency;
+  implementation_status: ImplementationStatus;
+  effectiveness: ControlEffectiveness;
   created_at: string;
   updated_at: string;
+  risk?: Risk | null;
 }
 
-export interface RiskControl {
-  id: string;
-  risk_id: string;
-  control_id: string;
-  created_at: string;
-}
+export type AssessmentStatus = 'COMPLIANT' | 'PARTIALLY_COMPLIANT' | 'NON_COMPLIANT' | 'NOT_APPLICABLE';
 
 export interface ControlAssessment {
   id: string;
   control_id: string;
-  assessment_date: string;
-  assessor_id: string;
-  design_effectiveness: 'effective' | 'partially_effective' | 'ineffective';
-  operating_effectiveness: 'effective' | 'partially_effective' | 'ineffective';
-  overall_effectiveness: 'effective' | 'partially_effective' | 'ineffective';
+  assessor_id: string | null;
+  status: AssessmentStatus;
+  score: number;
   notes: string | null;
-  next_assessment_date: string | null;
   created_at: string;
   updated_at: string;
+  checklist_items?: ControlChecklistItem[];
+  control?: Control;
 }
+
+export interface ControlChecklistItem {
+  id: string;
+  assessment_id: string;
+  title: string;
+  status: AssessmentStatus;
+  notes: string | null;
+  evidence_id: string | null;
+  evidence?: Evidence;
+}
+
+export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export interface Evidence {
   id: string;
-  control_assessment_id: string | null;
-  control_id: string | null;
-  title: string;
-  description: string | null;
+  evidence_code: string;
+  control_id: string;
   file_name: string;
   file_path: string;
-  file_size: number;
-  file_type: string;
-  uploaded_by: string;
-  review_status: 'pending' | 'approved' | 'rejected';
-  reviewed_by: string | null;
-  review_notes: string | null;
+  description: string | null;
+  uploaded_by: string | null;
+  review_status: ReviewStatus;
+  uploaded_at: string;
   reviewed_at: string | null;
-  created_at: string;
+  reviewer: string | null;
+  reviewer_notes: string | null;
+  control?: Control;
 }
+
+export type FindingSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type FindingStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'VERIFIED' | 'CLOSED';
 
 export interface Finding {
   id: string;
   finding_code: string;
   title: string;
   description: string | null;
-  type: 'nonconformity' | 'observation' | 'opportunity_for_improvement';
-  severity: 'critical' | 'high' | 'medium' | 'low';
-  status: 'open' | 'in_progress' | 'remediated' | 'closed' | 'accepted';
-  source: 'control_assessment' | 'audit' | 'incident' | 'self_assessment' | 'other';
-  control_id: string | null;
   risk_id: string | null;
-  asset_id: string | null;
-  control_assessment_id: string | null;
-  identified_by: string;
-  identified_date: string;
+  control_id: string | null;
+  severity: FindingSeverity;
+  recommendation: string | null;
+  owner: string | null;
   due_date: string | null;
-  closed_date: string | null;
+  status: FindingStatus;
   created_at: string;
   updated_at: string;
+  risk?: Risk | null;
+  control?: Control | null;
+  remediations?: Remediation[];
 }
 
-export interface RemediationPlan {
+export type RemediationStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'OVERDUE' | 'VERIFIED';
+
+export interface Remediation {
   id: string;
   finding_id: string;
+  action: string;
+  owner: string | null;
+  due_date: string | null;
+  status: RemediationStatus;
+  completion_notes: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  finding?: Finding;
+}
+
+export type ComplianceCategory =
+  | 'Access Control'
+  | 'Data Protection'
+  | 'Backup & Recovery'
+  | 'Change Management'
+  | 'Incident Management'
+  | 'Asset Management'
+  | 'Documentation';
+
+export interface ComplianceItem {
+  id: string;
   title: string;
-  description: string | null;
-  priority: 'critical' | 'high' | 'medium' | 'low';
-  status: 'planned' | 'in_progress' | 'completed' | 'overdue' | 'cancelled';
-  assigned_to: string | null;
-  start_date: string | null;
-  target_date: string | null;
-  completion_date: string | null;
-  progress_pct: number;
+  description: string;
+  category: ComplianceCategory;
+  status: AssessmentStatus;
   notes: string | null;
-  created_by: string;
+  responsible_owner: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface ComplianceFramework {
-  id: string;
-  name: string;
-  version: string | null;
-  description: string | null;
-  status: 'active' | 'inactive' | 'draft';
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ComplianceRequirement {
-  id: string;
-  framework_id: string;
-  requirement_code: string;
-  title: string;
-  description: string | null;
-  category: string | null;
-  created_at: string;
-}
-
-export interface ComplianceAssessment {
-  id: string;
-  requirement_id: string;
-  control_id: string | null;
-  status: 'compliant' | 'partially_compliant' | 'non_compliant' | 'not_applicable' | 'not_assessed';
-  evidence_notes: string | null;
-  assessed_by: string;
-  assessed_date: string;
-  next_review_date: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AuditLog {
+export interface ActivityLog {
   id: string;
   user_id: string | null;
   action: string;
-  entity_type: string;
-  entity_id: string | null;
-  details: Record<string, unknown> | null;
-  ip_address: string | null;
+  module: string;
+  reference_id: string | null;
+  details: Record<string, any> | null;
   created_at: string;
+  user_name?: string;
 }
 
-export interface ApiResponse<T = unknown> {
+export interface Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
-  error?: string;
+  pagination?: Pagination;
   message?: string;
-  pagination?: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
+  error?: string;
 }
 
 export interface LoginResponse {
   access_token: string;
   refresh_token: string;
+  expires_at?: number;
   user: UserProfile;
 }

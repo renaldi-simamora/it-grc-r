@@ -1,149 +1,188 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
-import { supabaseAdmin } from '../lib/supabase';
+import { store } from '../lib/store';
+import { ControlAssessment, ControlChecklistItem, AssessmentStatus } from '../types';
 
 const router = Router();
 
-function calcOverallEffectiveness(design: string, operating: string): string {
-  if (design === 'ineffective' || operating === 'ineffective') return 'ineffective';
-  if (design === 'partially_effective' || operating === 'partially_effective') return 'partially_effective';
-  return 'effective';
+export function calculateComplianceScore(items: { status: AssessmentStatus }[]): { score: number; status: AssessmentStatus } {
+  const applicableItems = items.filter((i) => i.status !== 'NOT_APPLICABLE');
+  if (applicableItems.length === 0) {
+    return { score: 100, status: 'NOT_APPLICABLE' };
+  }
+
+  let totalPoints = 0;
+  for (const item of applicableItems) {
+    if (item.status === 'COMPLIANT') {
+      totalPoints += 1.0;
+    } else if (item.status === 'PARTIALLY_COMPLIANT') {
+      totalPoints += 0.5;
+    }
+  }
+
+  const score = Math.round((totalPoints / applicableItems.length) * 100);
+
+  let status: AssessmentStatus = 'NON_COMPLIANT';
+  if (score >= 90) {
+    status = 'COMPLIANT';
+  } else if (score >= 50) {
+    status = 'PARTIALLY_COMPLIANT';
+  } else {
+    status = 'NON_COMPLIANT';
+  }
+
+  return { score, status };
 }
 
-// GET /
+// GET / — list assessments
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page as string) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
-    const offset = (page - 1) * limit;
     const control_id = req.query.control_id as string;
-
-    let query = supabaseAdmin.from('control_assessments').select('*', { count: 'exact' });
-    if (control_id) query = query.eq('control_id', control_id);
-
-    const { data, error, count } = await query
-      .order('assessment_date', { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    if (error) return res.status(500).json({ success: false, error: error.message });
-
-    const total = count || 0;
-    return res.json({
-      success: true,
-      data,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /:id
-router.get('/:id', authenticate, async (req: Request, res: Response) => {
-  try {
-    const { data: assessment, error } = await supabaseAdmin
-      .from('control_assessments')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-
-    if (error) return res.status(404).json({ success: false, error: 'Assessment not found' });
-
-    const { data: evidence } = await supabaseAdmin
-      .from('evidence')
-      .select('*')
-      .eq('control_assessment_id', assessment.id);
-
-    return res.json({ success: true, data: { ...assessment, evidence: evidence || [] } });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /
-router.post('/', authenticate, authorize('admin', 'analyst', 'auditor'), async (req: Request, res: Response) => {
-  try {
-    const { design_effectiveness, operating_effectiveness } = req.body;
-    const overall_effectiveness = calcOverallEffectiveness(design_effectiveness, operating_effectiveness);
-
-    const { data, error } = await supabaseAdmin
-      .from('control_assessments')
-      .insert({
-        ...req.body,
-        overall_effectiveness,
-        assessor_id: req.userId,
-      })
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'create',
-      entity_type: 'control_assessments',
-      entity_id: data.id,
-      details: { control_id: data.control_id },
-      ip_address: req.ip,
-    });
-
-    return res.status(201).json({ success: true, data, message: 'Assessment created' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// PUT /:id
-router.put('/:id', authenticate, authorize('admin', 'analyst', 'auditor'), async (req: Request, res: Response) => {
-  try {
-    const updates = { ...req.body, updated_at: new Date().toISOString() };
-
-    if (updates.design_effectiveness && updates.operating_effectiveness) {
-      updates.overall_effectiveness = calcOverallEffectiveness(
-        updates.design_effectiveness,
-        updates.operating_effectiveness,
-      );
+    let list = store.controlAssessments;
+    if (control_id) {
+      list = list.filter((ca) => ca.control_id === control_id);
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('control_assessments')
-      .update(updates)
-      .eq('id', req.params.id)
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'update',
-      entity_type: 'control_assessments',
-      entity_id: req.params.id,
-      details: req.body,
-      ip_address: req.ip,
+    const enriched = list.map((ca) => {
+      const control = store.controls.find((c) => c.id === ca.control_id);
+      const items = store.checklistItems.filter((chk) => chk.assessment_id === ca.id);
+      return {
+        ...ca,
+        control: control ? { id: control.id, control_code: control.control_code, name: control.name } : null,
+        checklist_items: items,
+      };
     });
 
-    return res.json({ success: true, data, message: 'Assessment updated' });
+    return res.json({ success: true, data: enriched });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// DELETE /:id
-router.delete('/:id', authenticate, authorize('admin'), async (req: Request, res: Response) => {
+// GET /:id — single assessment with checklist and evidence items
+router.get('/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    const { error } = await supabaseAdmin.from('control_assessments').delete().eq('id', req.params.id);
-    if (error) return res.status(400).json({ success: false, error: error.message });
+    const ca = store.controlAssessments.find((a) => a.id === req.params.id);
+    if (!ca) {
+      return res.status(404).json({ success: false, error: 'Control assessment not found' });
+    }
 
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'delete',
-      entity_type: 'control_assessments',
-      entity_id: req.params.id,
-      ip_address: req.ip,
+    const control = store.controls.find((c) => c.id === ca.control_id);
+    const items = store.checklistItems.filter((chk) => chk.assessment_id === ca.id).map((item) => {
+      const evidence = item.evidence_id ? store.evidences.find((e) => e.id === item.evidence_id) : null;
+      return { ...item, evidence };
     });
 
-    return res.json({ success: true, message: 'Assessment deleted' });
+    return res.json({
+      success: true,
+      data: {
+        ...ca,
+        control,
+        checklist_items: items,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST / — create new control assessment with checklist items
+router.post('/', authenticate, authorize('ADMIN', 'GRC_OFFICER'), async (req: Request, res: Response) => {
+  try {
+    const { control_id, notes, checklist_items } = req.body;
+    if (!control_id) {
+      return res.status(400).json({ success: false, error: 'control_id is required' });
+    }
+
+    const control = store.controls.find((c) => c.id === control_id);
+    if (!control) {
+      return res.status(404).json({ success: false, error: 'Control not found' });
+    }
+
+    const rawItems: { title: string; status: AssessmentStatus; notes?: string; evidence_id?: string }[] =
+      checklist_items && Array.isArray(checklist_items) && checklist_items.length > 0
+        ? checklist_items
+        : [
+            { title: 'Policy and standard procedures documented', status: 'COMPLIANT' },
+            { title: 'Technical control implementation operational', status: 'PARTIALLY_COMPLIANT' },
+            { title: 'Periodic monitoring and log review active', status: 'NON_COMPLIANT' },
+            { title: 'Supporting evidence collected and verified', status: 'PARTIALLY_COMPLIANT' },
+          ];
+
+    const { score, status } = calculateComplianceScore(rawItems);
+
+    const assessmentId = `ca-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newAssessment: ControlAssessment = {
+      id: assessmentId,
+      control_id,
+      assessor_id: req.userId || null,
+      status,
+      score,
+      notes: notes || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    store.controlAssessments.unshift(newAssessment);
+
+    // Insert checklist items
+    const createdItems: ControlChecklistItem[] = [];
+    for (const item of rawItems) {
+      const chk: ControlChecklistItem = {
+        id: `chk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        assessment_id: assessmentId,
+        title: item.title,
+        status: item.status || 'NON_COMPLIANT',
+        notes: item.notes || null,
+        evidence_id: item.evidence_id || null,
+      };
+      store.checklistItems.push(chk);
+      createdItems.push(chk);
+    }
+
+    // Update control implementation & effectiveness based on assessment score
+    if (score >= 90) {
+      control.implementation_status = 'IMPLEMENTED';
+      control.effectiveness = 'EFFECTIVE';
+    } else if (score >= 50) {
+      control.implementation_status = 'PARTIALLY_IMPLEMENTED';
+      control.effectiveness = 'PARTIALLY_EFFECTIVE';
+    } else {
+      control.implementation_status = 'NOT_IMPLEMENTED';
+      control.effectiveness = 'INEFFECTIVE';
+    }
+
+    store.logActivity(req.userId || null, 'ASSESSED_CONTROL', 'ControlAssessment', assessmentId, {
+      control_code: control.control_code,
+      score,
+      status,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        ...newAssessment,
+        checklist_items: createdItems,
+      },
+      message: `Control assessment completed with score ${score}% (${status})`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /:id — update assessment notes or checklist
+router.put('/:id', authenticate, authorize('ADMIN', 'GRC_OFFICER'), async (req: Request, res: Response) => {
+  try {
+    const ca = store.controlAssessments.find((a) => a.id === req.params.id);
+    if (!ca) {
+      return res.status(404).json({ success: false, error: 'Assessment not found' });
+    }
+
+    if (req.body.notes !== undefined) ca.notes = req.body.notes;
+    ca.updated_at = new Date().toISOString();
+
+    return res.json({ success: true, data: ca, message: 'Assessment updated' });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

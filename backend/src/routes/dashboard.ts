@@ -1,57 +1,108 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
-import { supabaseAdmin } from '../lib/supabase';
+import { store } from '../lib/store';
 
 const router = Router();
 
-// GET /stats
-router.get('/stats', authenticate, async (_req: Request, res: Response) => {
+// GET /stats or GET /summary — real live calculated metrics
+router.get(['/stats', '/summary'], authenticate, async (_req: Request, res: Response) => {
   try {
-    const [
-      { count: totalAssets },
-      { data: risks },
-      { data: controls },
-      { data: findings },
-      { data: assessments },
-    ] = await Promise.all([
-      supabaseAdmin.from('assets').select('*', { count: 'exact', head: true }),
-      supabaseAdmin.from('risks').select('risk_level, status'),
-      supabaseAdmin.from('controls').select('status'),
-      supabaseAdmin.from('findings').select('status, severity'),
-      supabaseAdmin.from('compliance_assessments').select('status'),
-    ]);
+    store.checkOverdueRemediations();
 
-    const risksByLevel = { critical: 0, high: 0, medium: 0, low: 0 } as Record<string, number>;
-    for (const r of risks || []) {
-      risksByLevel[r.risk_level] = (risksByLevel[r.risk_level] || 0) + 1;
+    const totalAssets = store.assets.length;
+    const totalRisks = store.risks.length;
+
+    // Risks by level
+    const risksByLevel = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+    const risksByCategory: Record<string, number> = {};
+    for (const r of store.risks) {
+      if (r.risk_level in risksByLevel) {
+        risksByLevel[r.risk_level as keyof typeof risksByLevel]++;
+      }
+      risksByCategory[r.category] = (risksByCategory[r.category] || 0) + 1;
     }
 
-    const controlsByStatus = {} as Record<string, number>;
-    for (const c of controls || []) {
-      controlsByStatus[c.status] = (controlsByStatus[c.status] || 0) + 1;
+    // Controls by implementation status & effectiveness
+    const controlsByStatus: Record<string, number> = {
+      IMPLEMENTED: 0,
+      PARTIALLY_IMPLEMENTED: 0,
+      NOT_IMPLEMENTED: 0,
+      NOT_APPLICABLE: 0,
+    };
+    for (const c of store.controls) {
+      if (c.implementation_status in controlsByStatus) {
+        controlsByStatus[c.implementation_status]++;
+      }
     }
 
-    const findingsByStatus = {} as Record<string, number>;
-    for (const f of findings || []) {
-      findingsByStatus[f.status] = (findingsByStatus[f.status] || 0) + 1;
+    // Findings by severity & status
+    const findingsBySeverity: Record<string, number> = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+    const findingsByStatus: Record<string, number> = { OPEN: 0, IN_PROGRESS: 0, RESOLVED: 0, VERIFIED: 0, CLOSED: 0 };
+    for (const f of store.findings) {
+      if (f.severity in findingsBySeverity) {
+        findingsBySeverity[f.severity]++;
+      }
+      if (f.status in findingsByStatus) {
+        findingsByStatus[f.status]++;
+      }
     }
 
-    const allAssessments = assessments || [];
-    const compliant = allAssessments.filter((a) => a.status === 'compliant').length;
-    const complianceRate = allAssessments.length > 0 ? Math.round((compliant / allAssessments.length) * 100) : 0;
+    // Remediations
+    const remediationsByStatus: Record<string, number> = {
+      OPEN: 0,
+      IN_PROGRESS: 0,
+      COMPLETED: 0,
+      OVERDUE: 0,
+      VERIFIED: 0,
+    };
+    for (const rem of store.remediations) {
+      if (rem.status in remediationsByStatus) {
+        remediationsByStatus[rem.status]++;
+      }
+    }
+
+    // Compliance calculation
+    const applicableCompliance = store.complianceItems.filter((i) => i.status !== 'NOT_APPLICABLE');
+    const compliantCount = store.complianceItems.filter((i) => i.status === 'COMPLIANT').length;
+    const partialCount = store.complianceItems.filter((i) => i.status === 'PARTIALLY_COMPLIANT').length;
+    const complianceRate =
+      applicableCompliance.length > 0
+        ? Math.round(((compliantCount + partialCount * 0.5) / applicableCompliance.length) * 100)
+        : 0;
+
+    // Recent activity logs
+    const recentActivity = store.activityLogs.slice(0, 10);
 
     return res.json({
       success: true,
       data: {
-        total_assets: totalAssets || 0,
-        total_risks: (risks || []).length,
-        total_controls: (controls || []).length,
-        total_findings: (findings || []).length,
+        total_assets: totalAssets,
+        total_risks: totalRisks,
+        critical_risks: risksByLevel.CRITICAL,
+        high_risks: risksByLevel.HIGH,
+        medium_risks: risksByLevel.MEDIUM,
+        low_risks: risksByLevel.LOW,
         risks_by_level: risksByLevel,
+        risks_by_category: risksByCategory,
+
+        total_controls: store.controls.length,
+        compliant_controls: controlsByStatus.IMPLEMENTED,
+        partially_compliant_controls: controlsByStatus.PARTIALLY_IMPLEMENTED,
+        non_compliant_controls: controlsByStatus.NOT_IMPLEMENTED,
         controls_by_status: controlsByStatus,
+
+        total_findings: store.findings.length,
+        open_findings: findingsByStatus.OPEN + findingsByStatus.IN_PROGRESS,
+        resolved_findings: findingsByStatus.RESOLVED + findingsByStatus.VERIFIED + findingsByStatus.CLOSED,
+        findings_by_severity: findingsBySeverity,
         findings_by_status: findingsByStatus,
-        compliance_rate: complianceRate,
-        total_assessments: allAssessments.length,
+
+        total_remediations: store.remediations.length,
+        overdue_remediation: remediationsByStatus.OVERDUE,
+        remediations_by_status: remediationsByStatus,
+
+        overall_compliance_percentage: complianceRate,
+        recent_activity: recentActivity,
       },
     });
   } catch (err: any) {
@@ -59,39 +110,30 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
   }
 });
 
-// GET /risk-matrix
-router.get('/risk-matrix', authenticate, async (_req: Request, res: Response) => {
+// GET /recent-activity — full list of recent activity logs
+router.get('/recent-activity', authenticate, async (req: Request, res: Response) => {
   try {
-    const { data: risks, error } = await supabaseAdmin.from('risks').select('likelihood, impact');
-    if (error) return res.status(500).json({ success: false, error: error.message });
-
-    // Build 5x5 matrix
-    const matrix: number[][] = Array.from({ length: 5 }, () => Array(5).fill(0));
-    for (const r of risks || []) {
-      if (r.likelihood >= 1 && r.likelihood <= 5 && r.impact >= 1 && r.impact <= 5) {
-        matrix[r.likelihood - 1][r.impact - 1]++;
-      }
-    }
-
-    return res.json({ success: true, data: { matrix, total_risks: (risks || []).length } });
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 20));
+    return res.json({
+      success: true,
+      data: store.activityLogs.slice(0, limit),
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET /recent-activity
-router.get('/recent-activity', authenticate, async (req: Request, res: Response) => {
+// GET /risk-matrix — 5x5 heatmap counts
+router.get('/risk-matrix', authenticate, async (_req: Request, res: Response) => {
   try {
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 20));
-
-    const { data, error } = await supabaseAdmin
-      .from('audit_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (error) return res.status(500).json({ success: false, error: error.message });
-    return res.json({ success: true, data });
+    const cells: { likelihood: number; impact: number; count: number }[] = [];
+    for (let l = 1; l <= 5; l++) {
+      for (let i = 1; i <= 5; i++) {
+        const count = store.risks.filter((r) => r.likelihood === l && r.impact === i).length;
+        cells.push({ likelihood: l, impact: i, count });
+      }
+    }
+    return res.json({ success: true, data: cells });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

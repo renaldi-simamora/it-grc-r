@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Search, Edit, Trash2, Eye, Loader2, Server } from 'lucide-react';
 import { api } from '@/lib/api';
-import { cn, getStatusColor, formatDate } from '@/utils/helpers';
+import { getStatusColor, formatDate } from '@/utils/helpers';
 import { useAuth } from '@/hooks/useAuth';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -15,54 +15,45 @@ import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Textarea } from '@/components/ui/Textarea';
 import { Table } from '@/components/ui/Table';
-import type { Asset, ApiResponse } from '@/types';
+import type { Asset, AssetType, CriticalityLevel, AssetStatus, ApiResponse } from '@/types';
 
 const typeOptions = [
-  { value: 'server', label: 'Server' },
-  { value: 'application', label: 'Application' },
-  { value: 'database', label: 'Database' },
-  { value: 'network_device', label: 'Network Device' },
-  { value: 'endpoint', label: 'Endpoint' },
-  { value: 'cloud_service', label: 'Cloud Service' },
-  { value: 'other', label: 'Other' },
-];
-
-const statusOptions = [
-  { value: 'active', label: 'Active' },
-  { value: 'inactive', label: 'Inactive' },
-  { value: 'decommissioned', label: 'Decommissioned' },
-  { value: 'under_review', label: 'Under Review' },
+  { value: 'Application', label: 'Application' },
+  { value: 'Database', label: 'Database' },
+  { value: 'Server', label: 'Server' },
+  { value: 'Network', label: 'Network' },
+  { value: 'Endpoint', label: 'Endpoint' },
+  { value: 'Cloud Service', label: 'Cloud Service' },
+  { value: 'Other', label: 'Other' },
 ];
 
 const criticalityOptions = [
-  { value: 'critical', label: 'Critical' },
-  { value: 'high', label: 'High' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'low', label: 'Low' },
+  { value: 'CRITICAL', label: 'Critical' },
+  { value: 'HIGH', label: 'High' },
+  { value: 'MEDIUM', label: 'Medium' },
+  { value: 'LOW', label: 'Low' },
 ];
 
-const classificationOptions = [
-  { value: 'public', label: 'Public' },
-  { value: 'internal', label: 'Internal' },
-  { value: 'confidential', label: 'Confidential' },
-  { value: 'restricted', label: 'Restricted' },
+const statusOptions = [
+  { value: 'ACTIVE', label: 'Active' },
+  { value: 'INACTIVE', label: 'Inactive' },
+  { value: 'RETIRED', label: 'Retired' },
 ];
 
 const emptyForm = {
   name: '',
-  type: 'server' as Asset['type'],
+  type: 'Application' as AssetType,
   description: '',
   owner: '',
   department: '',
-  location: '',
-  status: 'active' as Asset['status'],
-  criticality: 'medium' as Asset['criticality'],
-  classification: 'internal' as Asset['classification'],
+  criticality: 'MEDIUM' as CriticalityLevel,
+  status: 'ACTIVE' as AssetStatus,
 };
 
 export default function AssetsPage() {
   const { user } = useAuth();
-  const canEdit = user?.role === 'admin' || user?.role === 'analyst';
+  const canEdit = user?.role === 'ADMIN' || user?.role === 'GRC_OFFICER';
+  const canDelete = user?.role === 'ADMIN';
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,7 +80,7 @@ export default function AssetsPage() {
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams({ page: String(page), limit: '20' });
+      const params = new URLSearchParams({ page: String(page), limit: '10' });
       if (search) params.set('search', search);
       if (filterType) params.set('type', filterType);
       if (filterStatus) params.set('status', filterStatus);
@@ -105,10 +96,13 @@ export default function AssetsPage() {
     }
   }, [page, search, filterType, filterStatus, filterCriticality]);
 
-  useEffect(() => { fetchAssets(); }, [fetchAssets]);
+  useEffect(() => {
+    fetchAssets();
+  }, [fetchAssets]);
 
-  // Reset page on filter change
-  useEffect(() => { setPage(1); }, [search, filterType, filterStatus, filterCriticality]);
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterType, filterStatus, filterCriticality]);
 
   function openCreate() {
     setSelected(null);
@@ -124,10 +118,8 @@ export default function AssetsPage() {
       description: asset.description ?? '',
       owner: asset.owner ?? '',
       department: asset.department ?? '',
-      location: asset.location ?? '',
-      status: asset.status,
       criticality: asset.criticality,
-      classification: asset.classification,
+      status: asset.status,
     });
     setFormOpen(true);
   }
@@ -146,7 +138,6 @@ export default function AssetsPage() {
         description: form.description || null,
         owner: form.owner || null,
         department: form.department || null,
-        location: form.location || null,
       };
       if (isEditing) {
         await api.put(`/assets/${selected!.id}`, body);
@@ -164,7 +155,7 @@ export default function AssetsPage() {
   }
 
   async function handleDelete(asset: Asset) {
-    if (!window.confirm(`Delete asset "${asset.name}"?`)) return;
+    if (!window.confirm(`Delete asset "${asset.asset_code} — ${asset.name}"?`)) return;
     try {
       await api.delete(`/assets/${asset.id}`);
       fetchAssets();
@@ -175,124 +166,153 @@ export default function AssetsPage() {
 
   const columns = [
     {
+      key: 'asset_code',
+      title: 'Code',
+      render: (a: Asset) => (
+        <span className="font-mono text-xs font-semibold px-2 py-1 rounded bg-slate-100 text-slate-800 border border-slate-200">
+          {a.asset_code}
+        </span>
+      ),
+    },
+    {
       key: 'name',
-      title: 'Name',
+      title: 'Asset Name',
       render: (a: Asset) => (
         <div>
-          <p className="font-medium text-gray-900">{a.name}</p>
-          {a.description && <p className="text-xs text-gray-500 truncate max-w-xs">{a.description}</p>}
+          <p className="font-semibold text-slate-900">{a.name}</p>
+          {a.description && <p className="text-xs text-slate-500 truncate max-w-sm">{a.description}</p>}
         </div>
       ),
     },
     {
       key: 'type',
       title: 'Type',
-      render: (a: Asset) => <span className="capitalize">{a.type.replace('_', ' ')}</span>,
+      render: (a: Asset) => <span className="text-xs font-medium text-slate-700">{a.type}</span>,
     },
     {
       key: 'owner',
-      title: 'Owner',
-      render: (a: Asset) => <span>{a.owner ?? '—'}</span>,
-    },
-    {
-      key: 'status',
-      title: 'Status',
+      title: 'Owner & Dept',
       render: (a: Asset) => (
-        <Badge className={getStatusColor(a.status)}>
-          {a.status.replace('_', ' ')}
-        </Badge>
+        <div>
+          <p className="text-xs font-medium text-slate-800">{a.owner || '—'}</p>
+          <p className="text-[11px] text-slate-400">{a.department || '—'}</p>
+        </div>
       ),
     },
     {
       key: 'criticality',
       title: 'Criticality',
       render: (a: Asset) => (
-        <Badge className={getStatusColor(a.criticality)}>
+        <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${getStatusColor(a.criticality)}`}>
           {a.criticality}
-        </Badge>
+        </span>
       ),
     },
     {
-      key: 'classification',
-      title: 'Classification',
-      render: (a: Asset) => <span className="capitalize">{a.classification}</span>,
+      key: 'status',
+      title: 'Status',
+      render: (a: Asset) => (
+        <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${getStatusColor(a.status)}`}>
+          {a.status}
+        </span>
+      ),
     },
     {
       key: 'updated_at',
-      title: 'Updated',
-      render: (a: Asset) => <span className="text-gray-500">{formatDate(a.updated_at)}</span>,
+      title: 'Last Updated',
+      render: (a: Asset) => <span className="text-xs text-slate-500">{formatDate(a.updated_at)}</span>,
     },
     {
       key: 'actions',
       title: '',
       render: (a: Asset) => (
-        <div className="flex items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); openView(a); }} className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50" title="View">
+        <div className="flex items-center gap-1 justify-end">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              openView(a);
+            }}
+            className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-blue-50"
+            title="View Details"
+          >
             <Eye className="w-4 h-4" />
           </button>
           {canEdit && (
-            <>
-              <button onClick={(e) => { e.stopPropagation(); openEdit(a); }} className="p-1.5 text-gray-400 hover:text-yellow-600 rounded-lg hover:bg-yellow-50" title="Edit">
-                <Edit className="w-4 h-4" />
-              </button>
-              <button onClick={(e) => { e.stopPropagation(); handleDelete(a); }} className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50" title="Delete">
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                openEdit(a);
+              }}
+              className="p-1.5 text-slate-400 hover:text-amber-600 rounded-lg hover:bg-amber-50"
+              title="Edit Asset"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete(a);
+              }}
+              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
+              title="Delete Asset"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
           )}
         </div>
       ),
     },
   ];
 
-  const updateField = (field: string, value: string) =>
+  const updateField = (field: string, value: any) =>
     setForm((f) => ({ ...f, [field]: value }));
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">IT Assets</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage and track your organization&apos;s IT assets</p>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">IT Asset Management</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Inventory of IT hardware, applications, databases, and network components at PT Nusantara Digital
+          </p>
         </div>
         {canEdit && (
-          <Button onClick={openCreate}>
+          <Button onClick={openCreate} className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
             <Plus className="w-4 h-4 mr-2" />
-            Add Asset
+            Add New Asset
           </Button>
         )}
       </div>
 
-      {/* Filters */}
+      {/* Filters Card */}
       <Card>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <Input
-              placeholder="Search assets..."
+              placeholder="Search code, name, owner..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
             />
           </div>
           <Select
-            options={typeOptions}
-            placeholder="All Types"
+            options={[{ value: '', label: 'All Asset Types' }, ...typeOptions]}
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
           />
           <Select
-            options={statusOptions}
-            placeholder="All Statuses"
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-          />
-          <Select
-            options={criticalityOptions}
-            placeholder="All Criticalities"
+            options={[{ value: '', label: 'All Criticalities' }, ...criticalityOptions]}
             value={filterCriticality}
             onChange={(e) => setFilterCriticality(e.target.value)}
+          />
+          <Select
+            options={[{ value: '', label: 'All Statuses' }, ...statusOptions]}
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
           />
         </div>
       </Card>
@@ -305,133 +325,172 @@ export default function AssetsPage() {
       ) : error ? (
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
-            <p className="text-red-600 mb-2">{error}</p>
-            <button onClick={fetchAssets} className="text-blue-600 hover:underline text-sm">Retry</button>
+            <p className="text-rose-600 mb-2">{error}</p>
+            <button onClick={fetchAssets} className="text-blue-600 hover:underline text-sm font-semibold">
+              Retry
+            </button>
           </div>
         </div>
       ) : assets.length === 0 ? (
         <EmptyState
           title="No assets found"
-          description="Get started by adding your first IT asset."
-          icon={<Server className="w-12 h-12" />}
-          action={canEdit ? <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Add Asset</Button> : undefined}
+          description="Try clearing your filters or create your first asset."
+          icon={<Server className="w-12 h-12 text-slate-400" />}
+          action={
+            canEdit ? (
+              <Button onClick={openCreate}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Asset
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <Card padding={false}>
-          <Table<Asset>
-            columns={columns}
-            data={assets}
-            keyExtractor={(a) => a.id}
-          />
-          <div className="px-6 pb-4">
+          <Table<Asset> columns={columns} data={assets} keyExtractor={(a) => a.id} />
+          <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
+            <p className="text-xs text-slate-500">
+              Showing page {page} of {totalPages}
+            </p>
             <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
           </div>
         </Card>
       )}
 
-      {/* Create/Edit Modal */}
-      <Modal open={formOpen} onClose={() => setFormOpen(false)} title={isEditing ? 'Edit Asset' : 'Add Asset'} className="max-w-2xl">
+      {/* Create / Edit Modal */}
+      <Modal
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        title={isEditing ? `Edit Asset: ${selected?.asset_code}` : 'Add New IT Asset'}
+        className="max-w-2xl"
+      >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
-              label="Name"
+              label="Asset Name"
               required
+              placeholder="e.g. Customer Master DB"
               value={form.name}
               onChange={(e) => updateField('name', e.target.value)}
             />
             <Select
-              label="Type"
+              label="Asset Type"
               options={typeOptions}
               value={form.type}
               onChange={(e) => updateField('type', e.target.value)}
             />
             <Input
-              label="Owner"
+              label="Owner / Custodian"
+              placeholder="e.g. Budi Santoso"
               value={form.owner}
               onChange={(e) => updateField('owner', e.target.value)}
             />
             <Input
               label="Department"
+              placeholder="e.g. Data Infrastructure"
               value={form.department}
               onChange={(e) => updateField('department', e.target.value)}
             />
-            <Input
-              label="Location"
-              value={form.location}
-              onChange={(e) => updateField('location', e.target.value)}
-            />
             <Select
-              label="Status"
-              options={statusOptions}
-              value={form.status}
-              onChange={(e) => updateField('status', e.target.value)}
-            />
-            <Select
-              label="Criticality"
+              label="Criticality Rating"
               options={criticalityOptions}
               value={form.criticality}
               onChange={(e) => updateField('criticality', e.target.value)}
             />
             <Select
-              label="Classification"
-              options={classificationOptions}
-              value={form.classification}
-              onChange={(e) => updateField('classification', e.target.value)}
+              label="Operational Status"
+              options={statusOptions}
+              value={form.status}
+              onChange={(e) => updateField('status', e.target.value)}
             />
           </div>
           <Textarea
-            label="Description"
+            label="Description & Scope"
+            placeholder="Functional description and data sensitivity classification..."
             value={form.description}
             onChange={(e) => updateField('description', e.target.value)}
+            rows={3}
           />
           <div className="flex justify-end gap-3 pt-2">
-            <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button>
-            <Button type="submit" loading={submitting}>{isEditing ? 'Update' : 'Create'}</Button>
+            <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={submitting}>
+              {isEditing ? 'Save Changes' : 'Create Asset'}
+            </Button>
           </div>
         </form>
       </Modal>
 
-      {/* View Modal */}
-      <Modal open={viewOpen} onClose={() => { setViewOpen(false); setSelected(null); }} title="Asset Details" className="max-w-2xl">
+      {/* View Details Modal */}
+      <Modal
+        open={viewOpen}
+        onClose={() => {
+          setViewOpen(false);
+          setSelected(null);
+        }}
+        title={`Asset Details — ${selected?.asset_code || ''}`}
+        className="max-w-2xl"
+      >
         {selected && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <Detail label="Name" value={selected.name} />
-              <Detail label="Type" value={selected.type.replace('_', ' ')} />
-              <Detail label="Owner" value={selected.owner} />
-              <Detail label="Department" value={selected.department} />
-              <Detail label="Location" value={selected.location} />
-              <Detail label="Status">
-                <Badge className={getStatusColor(selected.status)}>{selected.status.replace('_', ' ')}</Badge>
-              </Detail>
-              <Detail label="Criticality">
-                <Badge className={getStatusColor(selected.criticality)}>{selected.criticality}</Badge>
-              </Detail>
-              <Detail label="Classification" value={selected.classification} />
-              <Detail label="Created" value={formatDate(selected.created_at)} />
-              <Detail label="Updated" value={formatDate(selected.updated_at)} />
-            </div>
-            {selected.description && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
               <div>
-                <p className="text-sm font-medium text-gray-500 mb-1">Description</p>
-                <p className="text-sm text-gray-900">{selected.description}</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Asset Code</p>
+                <p className="font-mono text-sm font-bold text-slate-900 mt-0.5">{selected.asset_code}</p>
               </div>
-            )}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</p>
+                <p className="text-sm font-medium text-slate-900 mt-0.5">{selected.type}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Owner</p>
+                <p className="text-sm font-medium text-slate-900 mt-0.5">{selected.owner || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Department</p>
+                <p className="text-sm font-medium text-slate-900 mt-0.5">{selected.department || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Criticality</p>
+                <div className="mt-0.5">
+                  <Badge className={getStatusColor(selected.criticality)}>{selected.criticality}</Badge>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</p>
+                <div className="mt-0.5">
+                  <Badge className={getStatusColor(selected.status)}>{selected.status}</Badge>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Description</p>
+              <div className="p-3 bg-white border border-slate-200 rounded-lg text-sm text-slate-800">
+                {selected.description || 'No description provided.'}
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center text-xs text-slate-400 border-t border-slate-100 pt-3">
+              <span>Created: {formatDate(selected.created_at)}</span>
+              <span>Updated: {formatDate(selected.updated_at)}</span>
+            </div>
+
             <div className="flex justify-end pt-2">
-              <Button variant="outline" onClick={() => { setViewOpen(false); setSelected(null); }}>Close</Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setViewOpen(false);
+                  setSelected(null);
+                }}
+              >
+                Close
+              </Button>
             </div>
           </div>
         )}
       </Modal>
-    </div>
-  );
-}
-
-function Detail({ label, value, children }: { label: string; value?: string | null; children?: React.ReactNode }) {
-  return (
-    <div>
-      <p className="text-sm font-medium text-gray-500">{label}</p>
-      {children ?? <p className="text-sm text-gray-900 capitalize">{value || '—'}</p>}
     </div>
   );
 }

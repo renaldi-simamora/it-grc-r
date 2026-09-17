@@ -1,132 +1,192 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
-import { supabaseAdmin } from '../lib/supabase';
+import { store } from '../lib/store';
+import { Remediation } from '../types';
 
 const router = Router();
 
-// GET /
+// GET / — list remediations with automatic overdue evaluation
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
+    store.checkOverdueRemediations();
+
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
-    const offset = (page - 1) * limit;
     const finding_id = req.query.finding_id as string;
     const status = req.query.status as string;
-    const priority = req.query.priority as string;
+    const owner = req.query.owner as string;
+    const search = ((req.query.search as string) || '').toLowerCase().trim();
 
-    let query = supabaseAdmin.from('remediation_plans').select('*', { count: 'exact' });
-    if (finding_id) query = query.eq('finding_id', finding_id);
-    if (status) query = query.eq('status', status);
-    if (priority) query = query.eq('priority', priority);
+    let filtered = store.remediations.filter((rem) => {
+      if (search) {
+        const matchesAction = rem.action.toLowerCase().includes(search);
+        const matchesOwner = (rem.owner || '').toLowerCase().includes(search);
+        const matchesNotes = (rem.completion_notes || '').toLowerCase().includes(search);
+        if (!matchesAction && !matchesOwner && !matchesNotes) return false;
+      }
+      if (finding_id && rem.finding_id !== finding_id) return false;
+      if (status && rem.status !== status) return false;
+      if (owner && rem.owner !== owner) return false;
+      return true;
+    });
 
-    const { data, error, count } = await query
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    // Enrich with finding info
+    const enriched = filtered.map((rem) => {
+      const finding = store.findings.find((f) => f.id === rem.finding_id);
+      return {
+        ...rem,
+        finding: finding
+          ? { id: finding.id, finding_code: finding.finding_code, title: finding.title, severity: finding.severity }
+          : null,
+      };
+    });
 
-    const total = count || 0;
+    const total = enriched.length;
+    const offset = (page - 1) * limit;
+    const paginated = enriched.slice(offset, offset + limit);
+
     return res.json({
       success: true,
-      data,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      data: paginated,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET /:id
+// GET /:id — single remediation
 router.get('/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('remediation_plans')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
+    store.checkOverdueRemediations();
 
-    if (error) return res.status(404).json({ success: false, error: 'Remediation plan not found' });
-    return res.json({ success: true, data });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /
-router.post('/', authenticate, authorize('admin', 'analyst'), async (req: Request, res: Response) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('remediation_plans')
-      .insert({ ...req.body, created_by: req.userId })
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'create',
-      entity_type: 'remediation_plans',
-      entity_id: data.id,
-      details: { title: data.title, finding_id: data.finding_id },
-      ip_address: req.ip,
-    });
-
-    return res.status(201).json({ success: true, data, message: 'Remediation plan created' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// PUT /:id
-router.put('/:id', authenticate, authorize('admin', 'analyst'), async (req: Request, res: Response) => {
-  try {
-    const updates = { ...req.body, updated_at: new Date().toISOString() };
-
-    if (updates.status === 'completed') {
-      updates.completion_date = updates.completion_date || new Date().toISOString().split('T')[0];
-      updates.progress_pct = 100;
+    const rem = store.remediations.find((r) => r.id === req.params.id);
+    if (!rem) {
+      return res.status(404).json({ success: false, error: 'Remediation not found' });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('remediation_plans')
-      .update(updates)
-      .eq('id', req.params.id)
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'update',
-      entity_type: 'remediation_plans',
-      entity_id: req.params.id,
-      details: req.body,
-      ip_address: req.ip,
+    const finding = store.findings.find((f) => f.id === rem.finding_id);
+    return res.json({
+      success: true,
+      data: {
+        ...rem,
+        finding: finding || null,
+      },
     });
-
-    return res.json({ success: true, data, message: 'Remediation plan updated' });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// DELETE /:id
-router.delete('/:id', authenticate, authorize('admin'), async (req: Request, res: Response) => {
+// POST / — create remediation plan
+router.post('/', authenticate, authorize('ADMIN', 'GRC_OFFICER'), async (req: Request, res: Response) => {
   try {
-    const { error } = await supabaseAdmin.from('remediation_plans').delete().eq('id', req.params.id);
-    if (error) return res.status(400).json({ success: false, error: error.message });
+    const { finding_id, action, owner, due_date, status, completion_notes } = req.body;
 
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'delete',
-      entity_type: 'remediation_plans',
-      entity_id: req.params.id,
-      ip_address: req.ip,
+    if (!finding_id || !action) {
+      return res.status(400).json({ success: false, error: 'finding_id and action are required' });
+    }
+
+    const finding = store.findings.find((f) => f.id === finding_id);
+    if (!finding) {
+      return res.status(404).json({ success: false, error: 'Associated finding not found' });
+    }
+
+    const isOverdue = due_date && new Date(due_date).getTime() < Date.now();
+    const resolvedStatus = status || (isOverdue ? 'OVERDUE' : 'OPEN');
+
+    const newRem: Remediation = {
+      id: `rem-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      finding_id,
+      action,
+      owner: owner || null,
+      due_date: due_date || null,
+      status: resolvedStatus,
+      completion_notes: completion_notes || null,
+      completed_at: resolvedStatus === 'COMPLETED' ? new Date().toISOString() : null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    store.remediations.unshift(newRem);
+    store.logActivity(req.userId || null, 'CREATED_REMEDIATION', 'Remediation', newRem.id, {
+      finding_code: finding.finding_code,
+      action: newRem.action,
+      owner: newRem.owner,
     });
 
-    return res.json({ success: true, message: 'Remediation plan deleted' });
+    return res.status(201).json({
+      success: true,
+      data: newRem,
+      message: 'Remediation plan created successfully',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /:id — update remediation
+router.put('/:id', authenticate, authorize('ADMIN', 'GRC_OFFICER'), async (req: Request, res: Response) => {
+  try {
+    const index = store.remediations.findIndex((r) => r.id === req.params.id);
+    if (index === -1) {
+      return res.status(404).json({ success: false, error: 'Remediation not found' });
+    }
+
+    const current = store.remediations[index];
+    const updates = { ...req.body };
+
+    if (updates.status === 'COMPLETED' && !current.completed_at) {
+      updates.completed_at = new Date().toISOString();
+    }
+
+    const updated: Remediation = {
+      ...current,
+      ...updates,
+      id: current.id,
+      updated_at: new Date().toISOString(),
+    };
+
+    store.remediations[index] = updated;
+    store.logActivity(req.userId || null, 'UPDATED_REMEDIATION', 'Remediation', updated.id, {
+      action: updated.action,
+      status: updated.status,
+    });
+
+    return res.json({
+      success: true,
+      data: updated,
+      message: 'Remediation updated successfully',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /:id — delete remediation
+router.delete('/:id', authenticate, authorize('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    const index = store.remediations.findIndex((r) => r.id === req.params.id);
+    if (index === -1) {
+      return res.status(404).json({ success: false, error: 'Remediation not found' });
+    }
+
+    const deleted = store.remediations.splice(index, 1)[0];
+    store.logActivity(req.userId || null, 'DELETED_REMEDIATION', 'Remediation', deleted.id, {
+      action: deleted.action,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Remediation plan deleted successfully',
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

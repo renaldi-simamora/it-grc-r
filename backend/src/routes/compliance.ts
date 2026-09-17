@@ -1,349 +1,151 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, authorize } from '../middleware/auth';
-import { supabaseAdmin } from '../lib/supabase';
+import { store } from '../lib/store';
+import { ComplianceItem, ComplianceCategory, AssessmentStatus } from '../types';
 
 const router = Router();
 
-// ─── Frameworks ───
+const COMPLIANCE_CATEGORIES: ComplianceCategory[] = [
+  'Access Control',
+  'Data Protection',
+  'Backup & Recovery',
+  'Change Management',
+  'Incident Management',
+  'Asset Management',
+  'Documentation',
+];
 
-// GET /frameworks
-router.get('/frameworks', authenticate, async (_req: Request, res: Response) => {
+// GET / — compliance summary, category rates, item checklist
+router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
-    const { data, error } = await supabaseAdmin.from('compliance_frameworks').select('*').order('name');
-    if (error) return res.status(500).json({ success: false, error: error.message });
-    return res.json({ success: true, data });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
+    const categoryFilter = req.query.category as string;
+    let items = store.complianceItems;
 
-// POST /frameworks
-router.post('/frameworks', authenticate, authorize('admin'), async (req: Request, res: Response) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('compliance_frameworks')
-      .insert(req.body)
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'create',
-      entity_type: 'compliance_frameworks',
-      entity_id: data.id,
-      details: { name: data.name },
-      ip_address: req.ip,
-    });
-
-    return res.status(201).json({ success: true, data, message: 'Framework created' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /frameworks/:id
-router.get('/frameworks/:id', authenticate, async (req: Request, res: Response) => {
-  try {
-    const { data: framework, error } = await supabaseAdmin
-      .from('compliance_frameworks')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-
-    if (error) return res.status(404).json({ success: false, error: 'Framework not found' });
-
-    const { data: requirements } = await supabaseAdmin
-      .from('compliance_requirements')
-      .select('*')
-      .eq('framework_id', framework.id)
-      .order('requirement_code');
-
-    // Get assessment stats for this framework
-    const reqIds = (requirements || []).map((r: any) => r.id);
-    let assessmentStats = { total: 0, compliant: 0, partially_compliant: 0, non_compliant: 0, not_assessed: 0, not_applicable: 0 };
-
-    if (reqIds.length > 0) {
-      const { data: assessments } = await supabaseAdmin
-        .from('compliance_assessments')
-        .select('status')
-        .in('requirement_id', reqIds);
-
-      if (assessments) {
-        assessmentStats.total = assessments.length;
-        for (const a of assessments) {
-          const key = a.status as keyof typeof assessmentStats;
-          if (key in assessmentStats && key !== 'total') {
-            assessmentStats[key]++;
-          }
-        }
-      }
+    if (categoryFilter) {
+      items = items.filter((i) => i.category === categoryFilter);
     }
+
+    // Category breakdown
+    const categoryStats: Record<
+      string,
+      { total: number; compliant: number; partially_compliant: number; non_compliant: number; not_applicable: number; rate: number }
+    > = {};
+
+    for (const cat of COMPLIANCE_CATEGORIES) {
+      const catItems = store.complianceItems.filter((i) => i.category === cat);
+      const applicable = catItems.filter((i) => i.status !== 'NOT_APPLICABLE');
+      const compliant = catItems.filter((i) => i.status === 'COMPLIANT').length;
+      const partial = catItems.filter((i) => i.status === 'PARTIALLY_COMPLIANT').length;
+      const nonCompliant = catItems.filter((i) => i.status === 'NON_COMPLIANT').length;
+      const na = catItems.filter((i) => i.status === 'NOT_APPLICABLE').length;
+
+      const rate = applicable.length > 0 ? Math.round(((compliant + partial * 0.5) / applicable.length) * 100) : 100;
+
+      categoryStats[cat] = {
+        total: catItems.length,
+        compliant,
+        partially_compliant: partial,
+        non_compliant: nonCompliant,
+        not_applicable: na,
+        rate,
+      };
+    }
+
+    // Overall compliance rate
+    const totalApplicable = store.complianceItems.filter((i) => i.status !== 'NOT_APPLICABLE');
+    const totalCompliant = store.complianceItems.filter((i) => i.status === 'COMPLIANT').length;
+    const totalPartial = store.complianceItems.filter((i) => i.status === 'PARTIALLY_COMPLIANT').length;
+
+    const overallRate =
+      totalApplicable.length > 0
+        ? Math.round(((totalCompliant + totalPartial * 0.5) / totalApplicable.length) * 100)
+        : 0;
+
+    const incompleteItems = store.complianceItems.filter(
+      (i) => i.status === 'NON_COMPLIANT' || i.status === 'PARTIALLY_COMPLIANT'
+    );
 
     return res.json({
       success: true,
-      data: { ...framework, requirements: requirements || [], assessment_stats: assessmentStats },
+      data: {
+        overall_compliance_rate: overallRate,
+        total_items: store.complianceItems.length,
+        applicable_items: totalApplicable.length,
+        compliant_items: totalCompliant,
+        category_breakdown: categoryStats,
+        incomplete_items: incompleteItems,
+        items,
+        disclaimer: 'SIMULATION / SYNTHETIC DATA — For Personal Portfolio & Academic Demonstration Only',
+      },
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// PUT /frameworks/:id
-router.put('/frameworks/:id', authenticate, authorize('admin'), async (req: Request, res: Response) => {
+// POST / — create new compliance item
+router.post('/', authenticate, authorize('ADMIN', 'GRC_OFFICER'), async (req: Request, res: Response) => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('compliance_frameworks')
-      .update({ ...req.body, updated_at: new Date().toISOString() })
-      .eq('id', req.params.id)
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'update',
-      entity_type: 'compliance_frameworks',
-      entity_id: req.params.id,
-      details: req.body,
-      ip_address: req.ip,
-    });
-
-    return res.json({ success: true, data, message: 'Framework updated' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// DELETE /frameworks/:id
-router.delete('/frameworks/:id', authenticate, authorize('admin'), async (req: Request, res: Response) => {
-  try {
-    const { error } = await supabaseAdmin.from('compliance_frameworks').delete().eq('id', req.params.id);
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'delete',
-      entity_type: 'compliance_frameworks',
-      entity_id: req.params.id,
-      ip_address: req.ip,
-    });
-
-    return res.json({ success: true, message: 'Framework deleted' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ─── Requirements ───
-
-// GET /frameworks/:id/requirements
-router.get('/frameworks/:id/requirements', authenticate, async (req: Request, res: Response) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('compliance_requirements')
-      .select('*')
-      .eq('framework_id', req.params.id)
-      .order('requirement_code');
-
-    if (error) return res.status(500).json({ success: false, error: error.message });
-    return res.json({ success: true, data });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /frameworks/:id/requirements
-router.post('/frameworks/:id/requirements', authenticate, authorize('admin'), async (req: Request, res: Response) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('compliance_requirements')
-      .insert({ ...req.body, framework_id: req.params.id })
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'create',
-      entity_type: 'compliance_requirements',
-      entity_id: data.id,
-      details: { framework_id: req.params.id, requirement_code: data.requirement_code },
-      ip_address: req.ip,
-    });
-
-    return res.status(201).json({ success: true, data, message: 'Requirement created' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// PUT /requirements/:id
-router.put('/requirements/:id', authenticate, authorize('admin'), async (req: Request, res: Response) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('compliance_requirements')
-      .update(req.body)
-      .eq('id', req.params.id)
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'update',
-      entity_type: 'compliance_requirements',
-      entity_id: req.params.id,
-      details: req.body,
-      ip_address: req.ip,
-    });
-
-    return res.json({ success: true, data, message: 'Requirement updated' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// DELETE /requirements/:id
-router.delete('/requirements/:id', authenticate, authorize('admin'), async (req: Request, res: Response) => {
-  try {
-    const { error } = await supabaseAdmin.from('compliance_requirements').delete().eq('id', req.params.id);
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'delete',
-      entity_type: 'compliance_requirements',
-      entity_id: req.params.id,
-      ip_address: req.ip,
-    });
-
-    return res.json({ success: true, message: 'Requirement deleted' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ─── Assessments ───
-
-// GET /assessments
-router.get('/assessments', authenticate, async (req: Request, res: Response) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page as string) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
-    const offset = (page - 1) * limit;
-    const requirement_id = req.query.requirement_id as string;
-    const framework_id = req.query.framework_id as string;
-
-    let query = supabaseAdmin.from('compliance_assessments').select('*', { count: 'exact' });
-    if (requirement_id) query = query.eq('requirement_id', requirement_id);
-
-    if (framework_id) {
-      // Get requirement IDs for this framework first
-      const { data: reqs } = await supabaseAdmin
-        .from('compliance_requirements')
-        .select('id')
-        .eq('framework_id', framework_id);
-      if (reqs && reqs.length > 0) {
-        query = query.in('requirement_id', reqs.map((r: any) => r.id));
-      } else {
-        return res.json({ success: true, data: [], pagination: { page, limit, total: 0, totalPages: 0 } });
-      }
+    const { title, description, category, status, notes, responsible_owner } = req.body;
+    if (!title || !category) {
+      return res.status(400).json({ success: false, error: 'title and category are required' });
     }
 
-    const { data, error, count } = await query
-      .order('assessed_date', { ascending: false })
-      .range(offset, offset + limit - 1);
+    const newItem: ComplianceItem = {
+      id: `cmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      title,
+      description: description || '',
+      category,
+      status: status || 'NON_COMPLIANT',
+      notes: notes || null,
+      responsible_owner: responsible_owner || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
 
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    store.complianceItems.push(newItem);
+    store.logActivity(req.userId || null, 'CREATED_COMPLIANCE_ITEM', 'Compliance', newItem.id, {
+      title: newItem.title,
+      category: newItem.category,
+    });
 
-    const total = count || 0;
+    return res.status(201).json({
+      success: true,
+      data: newItem,
+      message: 'Compliance item created',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /:id — update compliance status & notes
+router.put('/:id', authenticate, authorize('ADMIN', 'GRC_OFFICER'), async (req: Request, res: Response) => {
+  try {
+    const index = store.complianceItems.findIndex((i) => i.id === req.params.id);
+    if (index === -1) {
+      return res.status(404).json({ success: false, error: 'Compliance item not found' });
+    }
+
+    const current = store.complianceItems[index];
+    const updated: ComplianceItem = {
+      ...current,
+      ...req.body,
+      id: current.id,
+      updated_at: new Date().toISOString(),
+    };
+
+    store.complianceItems[index] = updated;
+    store.logActivity(req.userId || null, 'UPDATED_COMPLIANCE_ITEM', 'Compliance', updated.id, {
+      title: updated.title,
+      status: updated.status,
+    });
+
     return res.json({
       success: true,
-      data,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      data: updated,
+      message: 'Compliance item updated',
     });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /assessments
-router.post('/assessments', authenticate, authorize('admin', 'analyst', 'auditor'), async (req: Request, res: Response) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('compliance_assessments')
-      .insert({
-        ...req.body,
-        assessed_by: req.userId,
-        assessed_date: req.body.assessed_date || new Date().toISOString().split('T')[0],
-      })
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'create',
-      entity_type: 'compliance_assessments',
-      entity_id: data.id,
-      details: { requirement_id: data.requirement_id, status: data.status },
-      ip_address: req.ip,
-    });
-
-    return res.status(201).json({ success: true, data, message: 'Assessment created' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// PUT /assessments/:id
-router.put('/assessments/:id', authenticate, authorize('admin', 'analyst', 'auditor'), async (req: Request, res: Response) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('compliance_assessments')
-      .update({ ...req.body, updated_at: new Date().toISOString() })
-      .eq('id', req.params.id)
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'update',
-      entity_type: 'compliance_assessments',
-      entity_id: req.params.id,
-      details: req.body,
-      ip_address: req.ip,
-    });
-
-    return res.json({ success: true, data, message: 'Assessment updated' });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// DELETE /assessments/:id
-router.delete('/assessments/:id', authenticate, authorize('admin'), async (req: Request, res: Response) => {
-  try {
-    const { error } = await supabaseAdmin.from('compliance_assessments').delete().eq('id', req.params.id);
-    if (error) return res.status(400).json({ success: false, error: error.message });
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: req.userId,
-      action: 'delete',
-      entity_type: 'compliance_assessments',
-      entity_id: req.params.id,
-      ip_address: req.ip,
-    });
-
-    return res.json({ success: true, message: 'Assessment deleted' });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
