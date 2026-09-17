@@ -17,15 +17,15 @@ interface TableProps<T> {
 
 export function Table<T>({ columns, data, keyExtractor, className, onRowClick }: TableProps<T>) {
   return (
-    <div className={cn('overflow-x-auto', className)}>
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
+    <div className={cn('overflow-x-auto rounded-xl border border-white/10 bg-[#080D18]/80 backdrop-blur-xl', className)}>
+      <table className="min-w-full divide-y divide-white/[0.08]">
+        <thead className="bg-[#050810]/95 border-b border-white/[0.08]">
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
                 className={cn(
-                  'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider',
+                  'px-5 py-3.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider',
                   col.className
                 )}
               >
@@ -34,16 +34,19 @@ export function Table<T>({ columns, data, keyExtractor, className, onRowClick }:
             ))}
           </tr>
         </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
+        <tbody className="divide-y divide-white/[0.05] bg-transparent">
           {data.map((item) => (
             <tr
               key={keyExtractor(item)}
-              className={cn(onRowClick && 'cursor-pointer hover:bg-gray-50')}
+              className={cn(
+                'transition-colors duration-150',
+                onRowClick ? 'cursor-pointer hover:bg-white/[0.04]' : 'hover:bg-white/[0.02]'
+              )}
               onClick={() => onRowClick?.(item)}
             >
               {columns.map((col) => (
-                <td key={col.key} className={cn('px-6 py-4 whitespace-nowrap text-sm text-gray-900', col.className)}>
-                  {col.render ? col.render(item) : (item as Record<string, unknown>)[col.key] as React.ReactNode}
+                <td key={col.key} className={cn('px-5 py-3.5 whitespace-nowrap text-sm text-slate-200', col.className)}>
+                  {col.render ? col.render(item) : ((item as Record<string, unknown>)[col.key] as React.ReactNode)}
                 </td>
               ))}
             </tr>

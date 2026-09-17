@@ -10,14 +10,14 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "GRCTrack — IT GRC Management System",
-  description: "IT Governance, Risk & Compliance Management System — Portfolio Project",
+  title: "GRCTrack — IT Governance, Risk & Compliance Management",
+  description: "Portfolio-based IT GRC platform for managing assets, risks, controls, evidence, findings, remediation, and compliance assessments.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
-      <body className="h-full font-sans bg-gray-50">
+    <html lang="en" className={`${geistSans.variable} h-full antialiased`} suppressHydrationWarning>
+      <body className="h-full font-sans bg-[#04070B] text-slate-100" suppressHydrationWarning>
         <AuthProvider>
           <AppLayout>{children}</AppLayout>
         </AuthProvider>

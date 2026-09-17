@@ -9,15 +9,15 @@ export function getRiskLevelColor(level: string | undefined): string {
   const normalized = (level || '').toUpperCase();
   switch (normalized) {
     case 'CRITICAL':
-      return 'bg-red-100 text-red-800 border-red-200';
+      return 'bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-[0_0_12px_rgba(244,63,94,0.15)]';
     case 'HIGH':
-      return 'bg-orange-100 text-orange-800 border-orange-200';
+      return 'bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.15)]';
     case 'MEDIUM':
-      return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      return 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30';
     case 'LOW':
-      return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+      return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-[0_0_12px_rgba(74,222,128,0.15)]';
     default:
-      return 'bg-gray-100 text-gray-800 border-gray-200';
+      return 'bg-slate-800/80 text-slate-300 border border-slate-700/60';
   }
 }
 
@@ -31,7 +31,7 @@ export function getStatusColor(status: string | undefined): string {
     case 'APPROVED':
     case 'VERIFIED':
     case 'IMPLEMENTED':
-      return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+      return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-[0_0_12px_rgba(74,222,128,0.15)]';
 
     case 'INACTIVE':
     case 'RETIRED':
@@ -40,14 +40,14 @@ export function getStatusColor(status: string | undefined): string {
     case 'OVERDUE':
     case 'REJECTED':
     case 'NOT_IMPLEMENTED':
-      return 'bg-rose-100 text-rose-800 border-rose-200';
+      return 'bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-[0_0_12px_rgba(244,63,94,0.15)]';
 
     case 'PARTIALLY_EFFECTIVE':
     case 'PARTIALLY_COMPLIANT':
     case 'PARTIALLY_IMPLEMENTED':
     case 'IN_PROGRESS':
     case 'MITIGATED':
-      return 'bg-amber-100 text-amber-800 border-amber-200';
+      return 'bg-amber-500/15 text-amber-400 border border-amber-500/30';
 
     case 'OPEN':
     case 'PENDING':
@@ -55,10 +55,10 @@ export function getStatusColor(status: string | undefined): string {
     case 'NOT_APPLICABLE':
     case 'ACCEPTED':
     case 'CLOSED':
-      return 'bg-blue-100 text-blue-800 border-blue-200';
+      return 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30';
 
     default:
-      return 'bg-gray-100 text-gray-800 border-gray-200';
+      return 'bg-slate-800/80 text-slate-300 border border-slate-700/60';
   }
 }
 

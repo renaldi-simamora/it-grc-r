@@ -2,8 +2,150 @@
 
 @theme inline {
   --font-sans: var(--font-geist-sans);
+  --color-canvas: #04070B;
+  --color-canvas-subtle: #080C14;
+  --color-card-surface: rgba(11, 17, 30, 0.8);
+  --color-accent-lime: #4ADE80;
+  --color-accent-green: #22C55E;
+  --color-accent-cyan: #06B6D4;
+}
+
+:root {
+  --bg-canvas: #04070B;
+  --bg-canvas-subtle: #080C14;
+  --bg-card: rgba(11, 17, 30, 0.8);
+  --accent-lime: #4ADE80;
+  --accent-cyan: #06B6D4;
 }
 
 body {
-  font-family: var(--font-sans), system-ui, sans-serif;
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: #04070B;
+  color: #F8FAFC;
+  overflow-x: clip;
+}
+
+/* Custom Utilities for Enterprise Dark GRCTrack */
+.glass-card {
+  background: rgba(11, 17, 30, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  border-radius: 1rem;
+}
+
+.glass-card-hover {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card-hover:hover {
+  border-color: rgba(74, 222, 128, 0.35);
+  box-shadow: 
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 25px -5px rgba(74, 222, 128, 0.15),
+    0 20px 35px -10px rgba(0, 0, 0, 0.7);
+}
+
+.glass-input {
+  background: rgba(6, 10, 18, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #F8FAFC;
+  backdrop-filter: blur(12px);
+  transition: all 0.2s ease-in-out;
+}
+
+.glass-input:focus {
+  border-color: #4ADE80;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.25);
+}
+
+.glass-table {
+  background: rgba(8, 13, 22, 0.65);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.neon-glow-btn {
+  background-color: #4ADE80;
+  color: #04070B;
+  font-weight: 600;
+  box-shadow: 0 0 20px rgba(74, 222, 128, 0.4);
+  transition: all 0.2s ease-in-out;
+}
+
+.neon-glow-btn:hover {
+  background-color: #22C55E;
+  box-shadow: 0 0 30px rgba(74, 222, 128, 0.65);
+  transform: translateY(-1px);
+}
+
+.neon-glow-btn:active {
+  transform: translateY(0);
+}
+
+/* Custom sleek dark scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #04070B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(74, 222, 128, 0.4);
+}
+
+/* Dark Obsidian Enterprise Palette overrides for high-contrast B2B readability */
+.text-slate-900, .text-gray-900 {
+  color: #F8FAFC !important;
+}
+
+.text-slate-800, .text-gray-800, .text-slate-700, .text-gray-700 {
+  color: #E2E8F0 !important;
+}
+
+.text-slate-600, .text-gray-600 {
+  color: #94A3B8 !important;
+}
+
+.text-slate-500, .text-gray-500 {
+  color: #94A3B8 !important;
+}
+
+.bg-white {
+  background-color: rgba(11, 17, 30, 0.9) !important;
+  color: #F8FAFC !important;
+}
+
+.bg-slate-50, .bg-gray-50, .bg-slate-100, .bg-gray-100 {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  color: #E2E8F0 !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.border-slate-200, .border-gray-200, .border-slate-100, .border-gray-100, .border-gray-300, .border-slate-300 {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.hover\:bg-blue-50:hover, 
+.hover\:bg-amber-50:hover, 
+.hover\:bg-rose-50:hover, 
+.hover\:bg-gray-50:hover, 
+.hover\:bg-slate-50:hover, 
+.hover\:bg-gray-100:hover, 
+.hover\:bg-slate-100:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
 }

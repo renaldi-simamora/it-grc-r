@@ -11,9 +11,9 @@ interface PaginationProps {
 export function Pagination({ page, totalPages, onPageChange }: PaginationProps) {
   if (totalPages <= 1) return null;
   return (
-    <div className="flex items-center justify-between mt-4">
-      <p className="text-sm text-gray-500">
-        Page {page} of {totalPages}
+    <div className="flex items-center justify-between mt-5 pt-3 border-t border-white/[0.08]">
+      <p className="text-xs text-slate-400 font-mono">
+        Page <span className="text-white font-bold">{page}</span> of <span className="text-white font-bold">{totalPages}</span>
       </p>
       <div className="flex gap-2">
         <Button
