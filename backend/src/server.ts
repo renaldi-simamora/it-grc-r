@@ -6,3 +6,5 @@ app.listen(PORT, () => {
   console.log(`[GRCTrack] Server running on port ${PORT}`);
   console.log(`[GRCTrack] Environment: ${process.env.NODE_ENV || 'development'}`);
 });
+
+export default app;
